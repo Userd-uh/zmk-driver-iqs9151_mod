@@ -16,3 +16,9 @@ properties:
   bindings:
     type: phandle-array
     required: true
+  timeout-ms:
+    type: int
+    description: Delay after the last matching event before invoking timeout-bindings.
+  timeout-bindings:
+    type: phandle-array
+    description: Behavior invoked after timeout-ms has elapsed since the last matching event.
