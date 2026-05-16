@@ -93,7 +93,7 @@ static int ip_behavior_trigger_handle_event(const struct device *dev, struct inp
             const size_t binding_index = cfg->binding_count == 1 ? 0 : i;
             const bool pressed = event->value != 0;
 
-            if (cfg->timeout_binding != NULL && cfg->timeout_ms > 0) {
+            if ((cfg->timeout_binding != NULL || cfg->has_timeout_layer) && cfg->timeout_ms > 0) {
                 data->input_device_index = state->input_device_index;
                 (void)k_work_reschedule(&data->timeout_work, K_MSEC(cfg->timeout_ms));
             }
