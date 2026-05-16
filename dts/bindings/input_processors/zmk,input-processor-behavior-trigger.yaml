@@ -19,6 +19,9 @@ properties:
   timeout-ms:
     type: int
     description: Delay after the last matching event before invoking timeout-bindings.
+  timeout-layer:
+    type: int
+    description: Layer to switch to after timeout-ms has elapsed since the last matching event.
   timeout-bindings:
     type: phandle-array
     description: Behavior invoked after timeout-ms has elapsed since the last matching event.
