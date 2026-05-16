@@ -46,3 +46,10 @@ menuconfig ZMK_INPUT_PROCESSOR_BEHAVIOR_TRIGGER
     help
       Invoke a behavior for matched input events while allowing the original
       input event to continue through the input processor chain.
+
+menuconfig ZMK_INPUT_PROCESSOR_LAYER_TIMEOUT
+    bool "Layer timeout input processor"
+    default y
+    help
+      Select a layer when matching input events arrive, then select another
+      layer after no matching activity has arrived for the configured timeout.
