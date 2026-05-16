@@ -30,8 +30,6 @@ struct ip_behavior_trigger_config {
     const struct zmk_behavior_binding *bindings;
     const struct zmk_behavior_binding *timeout_binding;
     uint32_t timeout_ms;
-    uint8_t timeout_layer;
-    bool has_timeout_layer;
 };
 
 struct ip_behavior_trigger_data {
@@ -45,11 +43,6 @@ static void ip_behavior_trigger_timeout_work_handler(struct k_work *work) {
     struct ip_behavior_trigger_data *data =
         CONTAINER_OF(dwork, struct ip_behavior_trigger_data, timeout_work);
     const struct ip_behavior_trigger_config *cfg = data->dev->config;
-
-    if (cfg->has_timeout_layer) {
-        (void)zmk_keymap_layer_to(cfg->timeout_layer);
-        return;
-    }
 
     if (cfg->timeout_binding == NULL) {
         return;
@@ -65,6 +58,7 @@ static void ip_behavior_trigger_timeout_work_handler(struct k_work *work) {
     };
 
     (void)zmk_behavior_invoke_binding(cfg->timeout_binding, behavior_event, true);
+    (void)zmk_behavior_invoke_binding(cfg->timeout_binding, behavior_event, false);
 }
 
 static int ip_behavior_trigger_handle_event(const struct device *dev, struct input_event *event,
@@ -93,7 +87,7 @@ static int ip_behavior_trigger_handle_event(const struct device *dev, struct inp
             const size_t binding_index = cfg->binding_count == 1 ? 0 : i;
             const bool pressed = event->value != 0;
 
-            if ((cfg->timeout_binding != NULL || cfg->has_timeout_layer) && cfg->timeout_ms > 0) {
+            if (cfg->timeout_binding != NULL && cfg->timeout_ms > 0) {
                 data->input_device_index = state->input_device_index;
                 (void)k_work_reschedule(&data->timeout_work, K_MSEC(cfg->timeout_ms));
             }
@@ -142,9 +136,8 @@ static int ip_behavior_trigger_init(const struct device *dev) {
                       ARRAY_SIZE(ip_behavior_trigger_bindings_##n)),                              \
                  "bindings must have either one entry or the same length as codes");              \
     BUILD_ASSERT(DT_INST_PROP_OR(n, timeout_ms, 0) == 0 ||                                        \
-                     DT_INST_NODE_HAS_PROP(n, timeout_bindings) ||                                \
-                     DT_INST_NODE_HAS_PROP(n, timeout_layer),                                     \
-                 "timeout-bindings or timeout-layer is required when timeout-ms is non-zero");    \
+                     DT_INST_NODE_HAS_PROP(n, timeout_bindings),                                  \
+                 "timeout-bindings is required when timeout-ms is non-zero");                    \
     static const struct ip_behavior_trigger_config ip_behavior_trigger_config_##n = {              \
         .index = n,                                                                               \
         .type = DT_INST_PROP_OR(n, type, INPUT_EV_KEY),                                           \
@@ -154,8 +147,6 @@ static int ip_behavior_trigger_init(const struct device *dev) {
         .bindings = ip_behavior_trigger_bindings_##n,                                             \
         .timeout_binding = IP_BEHAVIOR_TRIGGER_TIMEOUT_BINDING(n),                                \
         .timeout_ms = DT_INST_PROP_OR(n, timeout_ms, 0),                                          \
-        .timeout_layer = DT_INST_PROP_OR(n, timeout_layer, 0),                                    \
-        .has_timeout_layer = DT_INST_NODE_HAS_PROP(n, timeout_layer),                             \
     };                                                                                            \
     static struct ip_behavior_trigger_data ip_behavior_trigger_data_##n;                           \
     DEVICE_DT_INST_DEFINE(n, &ip_behavior_trigger_init, NULL, &ip_behavior_trigger_data_##n,      \
