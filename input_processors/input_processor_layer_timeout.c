@@ -72,7 +72,7 @@ static int layer_timeout_handle_event(const struct device *dev, struct input_eve
             continue;
         }
 
-        LOG_DBG("layer-timeout[%u]: event type=%u code=%u value=%d", cfg->index, event->type,
+        LOG_INF("layer-timeout[%u]: event type=%u code=%u value=%d", cfg->index, event->type,
                 event->code, event->value);
 
         if (event->type == INPUT_EV_REL && event->value == 0) {
@@ -81,7 +81,7 @@ static int layer_timeout_handle_event(const struct device *dev, struct input_eve
         }
 
         int rc = zmk_keymap_layer_to(cfg->layer);
-        LOG_DBG("layer-timeout[%u]: activity -> layer %u rc=%d", cfg->index, cfg->layer, rc);
+        LOG_INF("layer-timeout[%u]: activity -> layer %u rc=%d", cfg->index, cfg->layer, rc);
 
         last_activity_ms = k_uptime_get();
         (void)k_work_reschedule(&data->timeout_work, K_MSEC(cfg->timeout_ms));
@@ -98,10 +98,13 @@ static struct zmk_input_processor_driver_api layer_timeout_driver_api = {
 };
 
 static int layer_timeout_init(const struct device *dev) {
+    const struct layer_timeout_config *cfg = dev->config;
     struct layer_timeout_data *data = dev->data;
 
     data->dev = dev;
     k_work_init_delayable(&data->timeout_work, layer_timeout_work_handler);
+    LOG_INF("layer-timeout[%u]: init layer=%u timeout-layer=%u timeout-ms=%u", cfg->index,
+            cfg->layer, cfg->timeout_layer, cfg->timeout_ms);
 
     return 0;
 }
