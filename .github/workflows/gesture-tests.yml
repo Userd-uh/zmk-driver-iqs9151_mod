@@ -1,0 +1,36 @@
+name: Gesture regression tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: zmkfirmware/zmk-build-arm:stable
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default, 0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: driver
+      - uses: actions/checkout@v4
+        with:
+          repository: zmkfirmware/zmk
+          ref: v0.3.0
+          path: zmk
+      - name: Prepare Zephyr
+        run: |
+          west init -l zmk/app
+          west update --fetch-opt=--filter=tree:0
+          west zephyr-export
+      - name: Build and run real driver frame tests
+        shell: bash
+        run: |
+          args=()
+          if [ '${{ matrix.mode }}' != default ]; then
+            args+=('-DIQS_GESTURE_MATRIX=${{ matrix.mode }}')
+          fi
+          west build -s driver/tests/iqs9151_work_cb -b native_sim_64 -d build -- -DZMK_APP_DIR="$PWD/zmk/app" "${args[@]}"
+          build/zephyr/zephyr.exe

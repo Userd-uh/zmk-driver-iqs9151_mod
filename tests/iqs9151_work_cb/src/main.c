@@ -1,5 +1,6 @@
 #include <zephyr/input/input.h>
 #include <zephyr/ztest.h>
+#include <dt-bindings/input/iqs9151-gestures.h>
 
 #include "iqs9151_regs.h"
 #include "iqs9151_test.h"
@@ -84,7 +85,8 @@ static void iqs9151_work_cb_before(void *fixture_ptr) {
     iqs9151_test_set_event_hook(record_event, &fixture->log);
 }
 
-ZTEST_F(iqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
+#ifndef IQS_GESTURE_MATRIX
+ZTEST_Fiqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
     const struct iqs9151_test_frame show_reset_frame =
         make_frame(2U, 2U, 0, 0, IQS9151_INFO_SHOW_RESET, 0, 0, 0, 0);
 
@@ -1355,10 +1357,10 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_right_emits_btn3_click) {
 
     zassert_equal(fixture->log.count, 2U, "Expected BTN3 click (press + release)");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_3, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_RIGHT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN3 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_3, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_RIGHT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN3 release");
 }
 
@@ -1383,10 +1385,10 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_continuous_touch_emits_once) {
     zassert_equal(fixture->log.count, 2U,
                   "Expected a single BTN3 click while 3 fingers stay on pad");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_3, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_RIGHT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN3 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_3, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_RIGHT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN3 release");
 }
 
@@ -1411,11 +1413,15 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
     zassert_equal(fixture->log.count, 2U,
                   "Expected a single BTN4 click while 3 fingers stay on pad");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_4, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_LEFT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN4 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_4, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_LEFT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN4 release");
 }
+
+#else
+#include "gesture_matrix.inc"
+#endif
 
 ZTEST_SUITE(iqs9151_work_cb, NULL, iqs9151_work_cb_setup, iqs9151_work_cb_before, NULL, NULL);

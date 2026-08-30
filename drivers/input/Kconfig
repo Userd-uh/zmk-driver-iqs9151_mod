@@ -238,29 +238,31 @@ config INPUT_IQS9151_2F_HORIZONTAL_NAV
     help
       When enabled, two-finger horizontal movement does not emit REL_HWHEEL.
       After the gesture ends, if horizontal movement dominates and exceeds the
-      navigation threshold, the driver emits INPUT_BTN_3 / INPUT_BTN_4 (same
-      codes as three-finger horizontal swipe). ZMK keymaps can bind these via
+      navigation threshold, the driver emits INPUT_BTN_3 / INPUT_BTN_4.
+      Three-finger Action uses separate codes. ZMK keymaps can bind these via
       tp_to_pos (e.g. MB4/MB5 back/forward). Vertical two-finger scroll is
       unchanged when INPUT_IQS9151_SCROLL_Y_ENABLE is set.
 
 config INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD
     int "Two-finger navigation swipe threshold"
-    depends on INPUT_IQS9151_2F_HORIZONTAL_NAV
     range 1 2000
     default 200
     help
-      Minimum accumulated horizontal centroid movement (same scale as the
-      three-finger swipe threshold) to emit INPUT_BTN_3 or INPUT_BTN_4 when
-      INPUT_IQS9151_2F_HORIZONTAL_NAV is enabled.
+      Minimum accumulated centroid movement on the dominant axis to emit a
+      two-finger Action when that axis mode is 2 (action). Applies to both
+      horizontal and vertical movement.
 
 config INPUT_IQS9151_2F_HORIZONTAL_MODE
     int "Two-finger horizontal action mode (0=disabled, 1=scroll, 2=action)"
     range 0 2
+    default 2 if INPUT_IQS9151_2F_HORIZONTAL_NAV
+    default 0 if !INPUT_IQS9151_SCROLL_X_ENABLE
     default 1
 
 config INPUT_IQS9151_2F_VERTICAL_MODE
     int "Two-finger vertical action mode (0=disabled, 1=scroll, 2=action)"
     range 0 2
+    default 0 if !INPUT_IQS9151_SCROLL_Y_ENABLE
     default 1
 
 config INPUT_IQS9151_2F_SCROLL_START_MOVE

@@ -15,6 +15,9 @@
 #include "iqs9151_init.h"
 #include "iqs9151_regs.h"
 #include "iqs9151_test.h"
+#include <dt-bindings/input/iqs9151-gestures.h>
+BUILD_ASSERT(IQS9151_BTN_2F_RIGHT == INPUT_BTN_3);
+BUILD_ASSERT(IQS9151_BTN_2F_LEFT == INPUT_BTN_4);
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -1339,12 +1342,12 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
             iqs9151_abs32(state->centroid_dx) >= CONFIG_INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD &&
             iqs9151_abs32(state->centroid_dx) >= iqs9151_abs32(state->centroid_dy)) {
             const uint16_t key =
-                (state->centroid_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3;
+                (state->centroid_dx < 0) ? IQS9151_BTN_2F_LEFT : IQS9151_BTN_2F_RIGHT;
             (void)iqs9151_emit_click(data, dev, key);
         } else if (CONFIG_INPUT_IQS9151_2F_VERTICAL_MODE == IQS9151_GESTURE_ACTION &&
                    iqs9151_abs32(state->centroid_dy) >= CONFIG_INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD &&
                    iqs9151_abs32(state->centroid_dy) > iqs9151_abs32(state->centroid_dx)) {
-            const uint16_t key = (state->centroid_dy < 0) ? INPUT_BTN_5 : INPUT_BTN_6;
+            const uint16_t key = (state->centroid_dy < 0) ? IQS9151_BTN_2F_UP : IQS9151_BTN_2F_DOWN;
             (void)iqs9151_emit_click(data, dev, key);
         }
     } else if (state->mode == IQS9151_2F_MODE_PINCH) {
@@ -1597,8 +1600,8 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
                     data->three_tap_candidate = false;
                 } else if (configured_mode == IQS9151_GESTURE_ACTION) {
                     const uint16_t key = horizontal
-                        ? ((data->three_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3)
-                        : ((data->three_dy < 0) ? INPUT_BTN_5 : INPUT_BTN_6);
+                        ? ((data->three_dx < 0) ? IQS9151_BTN_3F_LEFT : IQS9151_BTN_3F_RIGHT)
+                        : ((data->three_dy < 0) ? IQS9151_BTN_3F_UP : IQS9151_BTN_3F_DOWN);
                     iqs9151_report_key_event(dev, key, true, true, K_FOREVER);
                     iqs9151_report_key_event(dev, key, false, true, K_FOREVER);
                     data->three_swipe_sent = true;
@@ -1614,6 +1617,18 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
         if (data->three_mode == IQS9151_3F_MODE_VERTICAL_SCROLL && step_y != 0) {
             iqs9151_report_rel_event(dev, INPUT_REL_WHEEL, (int16_t)step_y, true, K_NO_WAIT);
             return true;
+        }
+        return true;
+    }
+
+    /* A completed 3F action/scroll owns its staged release until all fingers lift.
+     * Do not reinterpret 3->2->1 as a new 2F action or pointer gesture. */
+    if (data->three_mode != IQS9151_3F_MODE_NONE && !data->three_tapdrag_second_touch) {
+        if (frame->finger_count == 0U) {
+            iqs9151_three_finger_reset(data);
+        } else {
+            data->three_release_pending = true;
+            data->three_have_last = false;
         }
         return true;
     }
@@ -2276,6 +2291,8 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
     suppress_cursor_tail =
         iqs9151_should_suppress_cursor_for_two_finger_tail(data, frame, &prev_frame,
                                                            &two_result);
+    suppress_cursor_tail |= data->three_active && data->three_release_pending &&
+                            !data->three_tapdrag_second_touch;
 
     if (frame->finger_count == 3U || data->three_active) {
         iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);

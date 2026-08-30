@@ -6,3 +6,17 @@ tests:
     platform_allow:
       - native_sim
       - native_sim_64
+  iqs9151.gestures.disabled:
+    tags: [iqs9151, input]
+    platform_allow: [native_sim_64]
+    extra_args: IQS_GESTURE_MATRIX=0
+
+  iqs9151.gestures.scroll:
+    tags: [iqs9151, input]
+    platform_allow: [native_sim_64]
+    extra_args: IQS_GESTURE_MATRIX=1
+
+  iqs9151.gestures.action:
+    tags: [iqs9151, input]
+    platform_allow: [native_sim_64]
+    extra_args: IQS_GESTURE_MATRIX=2
