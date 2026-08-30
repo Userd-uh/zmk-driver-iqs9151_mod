@@ -1,14 +1,19 @@
 #define DT_DRV_COMPAT zmk_behavior_trackpad_to_pos
 
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #include <drivers/behavior.h>
 #include <zmk/behavior.h>
 #include <zmk/events/position_state_changed.h>
 
+LOG_MODULE_REGISTER(trackpad_to_pos, LOG_LEVEL_INF);
+
 static int behavior_trackpad_to_pos_raise(bool state,
                                           struct zmk_behavior_binding *binding,
                                           struct zmk_behavior_binding_event event) {
+    LOG_INF("tp_to_pos pos=%d state=%d", binding->param1, state);
+
     struct zmk_position_state_changed ev = {
         .position = binding->param1,
         .state = state,

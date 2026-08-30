@@ -257,6 +257,9 @@ static int iqs9151_report_key_event(const struct device *dev, uint16_t code,
         return 0;
     }
 #endif
+    if (code == INPUT_BTN_3 || code == INPUT_BTN_4) {
+        LOG_INF("2F NAV EVENT key=%u state=%d", code, !!value);
+    }
     return input_report_key(dev, code, value, sync, timeout);
 }
 
@@ -1325,6 +1328,9 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
         return;
     }
 
+    LOG_INF("2F END mode=%d dx=%d dy=%d dist=%d", state->mode,
+            state->centroid_dx, state->centroid_dy, state->distance_delta);
+
     if (state->mode == IQS9151_2F_MODE_SCROLL) {
         result->scroll_ended = true;
 #if IS_ENABLED(CONFIG_INPUT_IQS9151_2F_HORIZONTAL_NAV)
@@ -1332,6 +1338,8 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
             iqs9151_abs32(state->centroid_dx) >= iqs9151_abs32(state->centroid_dy)) {
             const uint16_t key =
                 (state->centroid_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3;
+            LOG_INF("2F NAV FIRE key=%u dx=%d dy=%d", key,
+                    state->centroid_dx, state->centroid_dy);
             (void)iqs9151_emit_click(data, dev, key);
         }
 #endif
