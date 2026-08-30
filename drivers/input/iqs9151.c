@@ -81,6 +81,9 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define TWO_FINGER_PINCH_WHEEL_DIV 12
 #define TWO_FINGER_PINCH_WHEEL_GAIN_X10 CONFIG_INPUT_IQS9151_2F_PINCH_WHEEL_GAIN_X10
 #define TWO_FINGER_PINCH_WHEEL_GAIN_DEN 10
+#define IQS9151_GESTURE_DISABLED 0
+#define IQS9151_GESTURE_SCROLL 1
+#define IQS9151_GESTURE_ACTION 2
 
 struct iqs9151_config {
     struct i2c_dt_spec i2c;
@@ -101,6 +104,12 @@ enum iqs9151_two_finger_mode {
     IQS9151_2F_MODE_NONE = 0,
     IQS9151_2F_MODE_SCROLL,
     IQS9151_2F_MODE_PINCH,
+};
+enum iqs9151_three_finger_mode {
+    IQS9151_3F_MODE_NONE = 0,
+    IQS9151_3F_MODE_HORIZONTAL_SCROLL,
+    IQS9151_3F_MODE_VERTICAL_SCROLL,
+    IQS9151_3F_MODE_ACTION_SENT,
 };
 struct iqs9151_one_finger_state {
     bool active;
@@ -222,6 +231,7 @@ struct iqs9151_data {
     bool three_tapdrag_second_touch;
     bool three_release_pending;
     bool three_have_last;
+    enum iqs9151_three_finger_mode three_mode;
     int64_t three_down_ms;
     int64_t three_release_pending_ms;
     int32_t three_dx;
@@ -1283,9 +1293,8 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
                 MAX(iqs9151_abs32(state->centroid_dx), iqs9151_abs32(state->centroid_dy));
             const int32_t abs_dist = iqs9151_abs32(state->distance_delta);
             const bool scroll_enabled =
-                IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_X_ENABLE) ||
-                IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_Y_ENABLE) ||
-                IS_ENABLED(CONFIG_INPUT_IQS9151_2F_HORIZONTAL_NAV);
+                CONFIG_INPUT_IQS9151_2F_HORIZONTAL_MODE != IQS9151_GESTURE_DISABLED ||
+                CONFIG_INPUT_IQS9151_2F_VERTICAL_MODE != IQS9151_GESTURE_DISABLED;
 
             if (scroll_enabled && abs_center >= TWO_FINGER_SCROLL_START_MOVE) {
                 state->mode = IQS9151_2F_MODE_SCROLL;
@@ -1302,11 +1311,10 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
 
         if (state->mode == IQS9151_2F_MODE_SCROLL) {
             result->scroll_active = true;
-            if (IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_X_ENABLE) &&
-                !IS_ENABLED(CONFIG_INPUT_IQS9151_2F_HORIZONTAL_NAV)) {
+            if (CONFIG_INPUT_IQS9151_2F_HORIZONTAL_MODE == IQS9151_GESTURE_SCROLL) {
                 result->scroll_x = (int16_t)CLAMP(step_x, INT16_MIN, INT16_MAX);
             }
-            if (IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_Y_ENABLE)) {
+            if (CONFIG_INPUT_IQS9151_2F_VERTICAL_MODE == IQS9151_GESTURE_SCROLL) {
                 result->scroll_y = (int16_t)CLAMP(step_y, INT16_MIN, INT16_MAX);
             }
         } else if (state->mode == IQS9151_2F_MODE_PINCH) {
@@ -1327,14 +1335,18 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
 
     if (state->mode == IQS9151_2F_MODE_SCROLL) {
         result->scroll_ended = true;
-#if IS_ENABLED(CONFIG_INPUT_IQS9151_2F_HORIZONTAL_NAV)
-        if (iqs9151_abs32(state->centroid_dx) >= CONFIG_INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD &&
+        if (CONFIG_INPUT_IQS9151_2F_HORIZONTAL_MODE == IQS9151_GESTURE_ACTION &&
+            iqs9151_abs32(state->centroid_dx) >= CONFIG_INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD &&
             iqs9151_abs32(state->centroid_dx) >= iqs9151_abs32(state->centroid_dy)) {
             const uint16_t key =
                 (state->centroid_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3;
             (void)iqs9151_emit_click(data, dev, key);
+        } else if (CONFIG_INPUT_IQS9151_2F_VERTICAL_MODE == IQS9151_GESTURE_ACTION &&
+                   iqs9151_abs32(state->centroid_dy) >= CONFIG_INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD &&
+                   iqs9151_abs32(state->centroid_dy) > iqs9151_abs32(state->centroid_dx)) {
+            const uint16_t key = (state->centroid_dy < 0) ? INPUT_BTN_5 : INPUT_BTN_6;
+            (void)iqs9151_emit_click(data, dev, key);
         }
-#endif
     } else if (state->mode == IQS9151_2F_MODE_PINCH) {
         result->pinch_ended = true;
     }
@@ -1453,6 +1465,7 @@ static void iqs9151_three_finger_reset(struct iqs9151_data *data) {
     data->three_active = false;
     data->three_hold_sent = false;
     data->three_swipe_sent = false;
+    data->three_mode = IQS9151_3F_MODE_NONE;
     data->three_tap_candidate = false;
     data->three_hold_candidate = false;
     data->three_tapdrag_second_touch = false;
@@ -1495,6 +1508,7 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
         data->three_active = true;
         data->three_hold_sent = tapdrag_second_touch;
         data->three_swipe_sent = false;
+        data->three_mode = IQS9151_3F_MODE_NONE;
         data->three_tap_candidate = !tapdrag_second_touch &&
             ((prev_frame->finger_count == 0U) ||
              iqs9151_has_recent_finger_count(data, 0U, now_ms,
@@ -1537,12 +1551,14 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
             data->three_release_pending_ms = 0;
         }
 
+        int32_t step_x = 0;
+        int32_t step_y = 0;
         if (finger1_valid) {
             if (data->three_have_last) {
-                const int32_t dx = (int32_t)frame->finger1_x - (int32_t)data->three_last_x;
-                const int32_t dy = (int32_t)frame->finger1_y - (int32_t)data->three_last_y;
-                data->three_dx += dx;
-                data->three_dy += dy;
+                step_x = (int32_t)frame->finger1_x - (int32_t)data->three_last_x;
+                step_y = (int32_t)frame->finger1_y - (int32_t)data->three_last_y;
+                data->three_dx += step_x;
+                data->three_dy += step_y;
             }
             data->three_last_x = frame->finger1_x;
             data->three_last_y = frame->finger1_y;
@@ -1565,22 +1581,39 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
             return true;
         }
 
-        if (!data->three_swipe_sent && !data->three_hold_sent) {
-            if (iqs9151_abs32(data->three_dx) >= CONFIG_INPUT_IQS9151_3F_SWIPE_THRESHOLD &&
-                iqs9151_abs32(data->three_dx) >= iqs9151_abs32(data->three_dy)) {
-                const uint16_t key = (data->three_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3;
-                iqs9151_report_key_event(dev, key, true, true, K_FOREVER);
-                iqs9151_report_key_event(dev, key, false, true, K_FOREVER);
-                data->three_swipe_sent = true;
-                return true;
-            } else if (iqs9151_abs32(data->three_dy) >= CONFIG_INPUT_IQS9151_3F_SWIPE_THRESHOLD &&
-                       iqs9151_abs32(data->three_dy) > iqs9151_abs32(data->three_dx)) {
-                const uint16_t key = (data->three_dy < 0) ? INPUT_BTN_5 : INPUT_BTN_6;
-                iqs9151_report_key_event(dev, key, true, true, K_FOREVER);
-                iqs9151_report_key_event(dev, key, false, true, K_FOREVER);
-                data->three_swipe_sent = true;
-                return true;
+        if (data->three_mode == IQS9151_3F_MODE_NONE && !data->three_hold_sent) {
+            const bool horizontal = iqs9151_abs32(data->three_dx) >= iqs9151_abs32(data->three_dy);
+            const int32_t dominant = horizontal ? iqs9151_abs32(data->three_dx)
+                                                : iqs9151_abs32(data->three_dy);
+            const int configured_mode = horizontal ? CONFIG_INPUT_IQS9151_3F_HORIZONTAL_MODE
+                                                   : CONFIG_INPUT_IQS9151_3F_VERTICAL_MODE;
+            const int32_t threshold = configured_mode == IQS9151_GESTURE_SCROLL
+                                          ? TWO_FINGER_SCROLL_START_MOVE
+                                          : CONFIG_INPUT_IQS9151_3F_SWIPE_THRESHOLD;
+            if (dominant >= threshold) {
+                if (configured_mode == IQS9151_GESTURE_SCROLL) {
+                    data->three_mode = horizontal ? IQS9151_3F_MODE_HORIZONTAL_SCROLL
+                                                  : IQS9151_3F_MODE_VERTICAL_SCROLL;
+                    data->three_tap_candidate = false;
+                } else if (configured_mode == IQS9151_GESTURE_ACTION) {
+                    const uint16_t key = horizontal
+                        ? ((data->three_dx < 0) ? INPUT_BTN_4 : INPUT_BTN_3)
+                        : ((data->three_dy < 0) ? INPUT_BTN_5 : INPUT_BTN_6);
+                    iqs9151_report_key_event(dev, key, true, true, K_FOREVER);
+                    iqs9151_report_key_event(dev, key, false, true, K_FOREVER);
+                    data->three_swipe_sent = true;
+                    data->three_mode = IQS9151_3F_MODE_ACTION_SENT;
+                    return true;
+                }
             }
+        }
+        if (data->three_mode == IQS9151_3F_MODE_HORIZONTAL_SCROLL && step_x != 0) {
+            iqs9151_report_rel_event(dev, INPUT_REL_HWHEEL, (int16_t)-step_x, true, K_NO_WAIT);
+            return true;
+        }
+        if (data->three_mode == IQS9151_3F_MODE_VERTICAL_SCROLL && step_y != 0) {
+            iqs9151_report_rel_event(dev, INPUT_REL_WHEEL, (int16_t)step_y, true, K_NO_WAIT);
+            return true;
         }
         return true;
     }

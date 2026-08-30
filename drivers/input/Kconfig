@@ -253,6 +253,16 @@ config INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD
       three-finger swipe threshold) to emit INPUT_BTN_3 or INPUT_BTN_4 when
       INPUT_IQS9151_2F_HORIZONTAL_NAV is enabled.
 
+config INPUT_IQS9151_2F_HORIZONTAL_MODE
+    int "Two-finger horizontal action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 1
+
+config INPUT_IQS9151_2F_VERTICAL_MODE
+    int "Two-finger vertical action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 1
+
 config INPUT_IQS9151_2F_SCROLL_START_MOVE
     int "IQS9151 two-finger scroll start threshold"
     range 1 2000
@@ -368,6 +378,16 @@ config INPUT_IQS9151_3F_SWIPE_THRESHOLD
     default 200
     help
       Three-finger swipe threshold (driver-side).
+
+config INPUT_IQS9151_3F_HORIZONTAL_MODE
+    int "Three-finger horizontal action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 2
+
+config INPUT_IQS9151_3F_VERTICAL_MODE
+    int "Three-finger vertical action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 2
 
 config INPUT_IQS9151_TEST
     bool "IQS9151 test hooks"
