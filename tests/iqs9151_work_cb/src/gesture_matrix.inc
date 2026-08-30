@@ -17,7 +17,8 @@ ZTEST_F(iqs9151_work_cb, test_mode_axis_direction_and_staged_release) {
                 }
                 for (int tail = fingers - 1; tail >= 0; tail--) {
                     frame.finger_count = tail;
-                    frame.trackpad_flags = tail ? (IQS9151_TP_FINGER1_CONFIDENCE | tail) : 0;
+                    frame.trackpad_flags = tail ? (IQS9151_TP_FINGER1_CONFIDENCE |
+                        (IQS_GESTURE_MATRIX ? IQS9151_TP_MOVEMENT_DETECTED : 0) | tail) : 0;
                     frame.rel_x = 20;
                     iqs9151_test_process_frame(fixture->ctx, &frame, k_uptime_get());
                 }

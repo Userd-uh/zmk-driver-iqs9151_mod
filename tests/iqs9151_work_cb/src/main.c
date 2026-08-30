@@ -86,7 +86,7 @@ static void iqs9151_work_cb_before(void *fixture_ptr) {
 }
 
 #ifndef IQS_GESTURE_MATRIX
-ZTEST_Fiqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
+ZTEST_F(iqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
     const struct iqs9151_test_frame show_reset_frame =
         make_frame(2U, 2U, 0, 0, IQS9151_INFO_SHOW_RESET, 0, 0, 0, 0);
 
