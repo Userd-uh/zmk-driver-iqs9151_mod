@@ -23,6 +23,7 @@ jobs:
       - name: Prepare Zephyr
         run: |
           west init -l zmk/app
+          cd zmk
           west update --fetch-opt=--filter=tree:0
           west zephyr-export
       - name: Build and run real driver frame tests
@@ -32,5 +33,6 @@ jobs:
           if [ '${{ matrix.mode }}' != default ]; then
             args+=('-DIQS_GESTURE_MATRIX=${{ matrix.mode }}')
           fi
-          west build -s driver/tests/iqs9151_work_cb -b native_sim_64 -d build -- -DZMK_APP_DIR="$PWD/zmk/app" "${args[@]}"
+          cd zmk
+          west build -s ../driver/tests/iqs9151_work_cb -b native_sim_64 -d build -- -DZMK_APP_DIR="$PWD/app" "${args[@]}"
           build/zephyr/zephyr.exe
