@@ -241,6 +241,11 @@ struct iqs9151_data {
     int32_t three_dy;
     uint16_t three_last_x;
     uint16_t three_last_y;
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    uint32_t diagnostic_seq;
+    int32_t diagnostic_step2_x, diagnostic_step2_y;
+    int32_t diagnostic_step3_x, diagnostic_step3_y;
+#endif
     uint16_t hold_button;
     struct iqs9151_finger_history_entry finger_history[IQS9151_FINGER_HISTORY_SIZE];
     uint8_t finger_history_head;
@@ -1273,6 +1278,11 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
             state->distance_delta += step_dist;
         }
 
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+        data->diagnostic_step2_x = step_x;
+        data->diagnostic_step2_y = step_y;
+#endif
+
         if (state->tap_candidate &&
             (elapsed_ms > TWO_FINGER_TAP_MAX_MS ||
              iqs9151_abs32(state->centroid_dx) > TWO_FINGER_TAP_MOVE ||
@@ -1573,6 +1583,11 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
             data->three_last_y = frame->finger1_y;
             data->three_have_last = true;
         }
+
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+        data->diagnostic_step3_x = step_x;
+        data->diagnostic_step3_y = step_y;
+#endif
 
         if (data->three_tap_candidate &&
             (elapsed > THREE_FINGER_TAP_MAX_MS ||
@@ -2298,8 +2313,38 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
         return;
     }
 
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    /* Include release/count transitions, but not repeated idle frames. Sequence
+     * numbers join the four records and expose dropped logging records. */
+    const bool diagnose = frame->finger_count || prev_frame.finger_count || data->three_active;
+    data->diagnostic_step2_x = data->diagnostic_step2_y = 0;
+    data->diagnostic_step3_x = data->diagnostic_step3_y = 0;
+    if (diagnose) {
+        ++data->diagnostic_seq;
+        LOG_INF("GIN seq=%u t=%u fc=%u f1v=%u f1=%u,%u f2v=%u f2=%u,%u",
+                data->diagnostic_seq, (uint32_t)now_ms, frame->finger_count,
+                iqs9151_finger1_valid(frame), frame->finger1_x, frame->finger1_y,
+                iqs9151_finger2_valid(frame), frame->finger2_x, frame->finger2_y);
+        LOG_INF("GPRE seq=%u a3=%u m3=%u last3=%u sum3=%d,%d",
+                data->diagnostic_seq, data->three_active, data->three_mode,
+                data->three_have_last, data->three_dx, data->three_dy);
+    }
+#endif
+
     released_from_hold =
         iqs9151_update_gesture_sessions(data, frame, &prev_frame, &two_result);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    if (diagnose) {
+        LOG_INF("GSTEP seq=%u step2=%d,%d step3=%d,%d a3=%u m3=%u last3=%u sum3=%d,%d",
+                data->diagnostic_seq, data->diagnostic_step2_x, data->diagnostic_step2_y,
+                data->diagnostic_step3_x, data->diagnostic_step3_y,
+                data->three_active, data->three_mode, data->three_have_last,
+                data->three_dx, data->three_dy);
+        LOG_INF("GOUT seq=%u started=%u active=%u scroll=%d,%d ended=%u",
+                data->diagnostic_seq, two_result.scroll_started, two_result.scroll_active,
+                two_result.scroll_x, two_result.scroll_y, two_result.scroll_ended);
+    }
+#endif
     suppress_cursor_tail =
         iqs9151_should_suppress_cursor_for_two_finger_tail(data, frame, &prev_frame,
                                                            &two_result);
