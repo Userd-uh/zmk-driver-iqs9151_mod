@@ -30,6 +30,8 @@ config INPUT_IQS9151_GESTURE_DIAGNOSTICS
       Set INPUT_IQS9151_LOG_LEVEL to at least 3. Diagnostic state and logging
       are compiled out when disabled. Use only for short diagnostic captures;
       logging can affect timing. Does not change gesture modes or gains.
+      Diagnostics read all seven finger slots in one 72-byte transaction
+      (normal builds read 28 bytes), plus a one-time boot settings readback.
 
 config INPUT_IQS9151_INIT_PRIORITY
     int "IQS9151 init priority"

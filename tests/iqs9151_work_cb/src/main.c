@@ -1,5 +1,7 @@
 #include <zephyr/input/input.h>
 #include <zephyr/ztest.h>
+#include <zephyr/sys/byteorder.h>
+#include <errno.h>
 #include <dt-bindings/input/iqs9151-gestures.h>
 
 #include "iqs9151_regs.h"
@@ -1426,6 +1428,10 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
 #else
 #include "gesture_matrix.inc"
 #endif
+#endif
+
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+#include "sensor_diagnostics.inc"
 #endif
 
 ZTEST_SUITE(iqs9151_work_cb, NULL, iqs9151_work_cb_setup, iqs9151_work_cb_before, NULL, NULL);

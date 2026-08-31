@@ -34,7 +34,12 @@ LOG_MODULE_REGISTER(iqs9151, CONFIG_INPUT_IQS9151_LOG_LEVEL);
 #define INERTIA_FP_SHIFT 8
 #define EMA_FP_SHIFT INERTIA_FP_SHIFT
 #define EMA_ALPHA_DEN (1 << EMA_FP_SHIFT)
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+/* One coherent read through Finger 7 Area (0x105A..0x105B). */
+#define IQS9151_FRAME_READ_SIZE 72
+#else
 #define IQS9151_FRAME_READ_SIZE 28
+#endif
 #define IQS9151_INERTIA_MOTION_HISTORY_SIZE 12
 
 #define SCROLL_INERTIA_INTERVAL_MS 10
@@ -102,6 +107,9 @@ struct iqs9151_frame {
     uint16_t finger1_y;
     uint16_t finger2_x;
     uint16_t finger2_y;
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    uint8_t diagnostic_raw[IQS9151_FRAME_READ_SIZE];
+#endif
 };
 enum iqs9151_two_finger_mode {
     IQS9151_2F_MODE_NONE = 0,
@@ -245,6 +253,8 @@ struct iqs9151_data {
     uint32_t diagnostic_seq;
     int32_t diagnostic_step2_x, diagnostic_step2_y;
     int32_t diagnostic_step3_x, diagnostic_step3_y;
+    int diagnostic_config_rc;
+    uint8_t diagnostic_config[20]; /* Boot readback, 0x11E2..0x11F5. */
 #endif
     uint16_t hold_button;
     struct iqs9151_finger_history_entry finger_history[IQS9151_FINGER_HISTORY_SIZE];
@@ -660,7 +670,41 @@ static void iqs9151_parse_frame(const uint8_t *raw, struct iqs9151_frame *frame)
     frame->finger1_y = sys_get_le16(&raw[18]);
     frame->finger2_x = sys_get_le16(&raw[24]);
     frame->finger2_y = sys_get_le16(&raw[26]);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    memcpy(frame->diagnostic_raw, raw, sizeof(frame->diagnostic_raw));
+#endif
 }
+
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+static void iqs9151_log_sensor_diagnostics(const struct iqs9151_data *data,
+                                         const struct iqs9151_frame *frame,
+                                         bool first_contact) {
+    const uint32_t seq = data->diagnostic_seq;
+    if (first_contact) {
+        /* Replay a cached boot readback after the host connects, with no extra
+         * I2C transactions during a gesture. Never pass defaults off as readback. */
+        LOG_INF("GCFG seq=%u version=2 source=boot rc=%d", seq, data->diagnostic_config_rc);
+        if (data->diagnostic_config_rc == 0) {
+            const uint8_t *cfg = data->diagnostic_config;
+            LOG_INF("GCFGV seq=%u settings=0x%02x rx=%u tx=%u max=%u split=%u confidence=%u",
+                    seq, cfg[0], cfg[1], cfg[2], cfg[3], cfg[15], cfg[19]);
+            LOG_INF("GCFGF seq=%u res=%u,%u bottom=%u top=%u beta=%u stationary=%u jitter=%u",
+                    seq, sys_get_le16(cfg + 4), sys_get_le16(cfg + 6),
+                    sys_get_le16(cfg + 8), sys_get_le16(cfg + 10), cfg[12], cfg[14], cfg[18]);
+        }
+    }
+    LOG_INF("GRAW seq=%u info=0x%04x tp=0x%04x", seq, frame->info_flags, frame->trackpad_flags);
+    /* Slots are stable tracking IDs, not a compact list. Capture all seven,
+     * including invalid slots, to distinguish merging from confidence loss. */
+    for (int slot = 0; slot < 7; slot++) {
+        const uint8_t *finger = frame->diagnostic_raw + 16 + slot * 8;
+        LOG_INF("GF seq=%u slot=%u xy=%u,%u strength=%u area=%u confidence=%u",
+                seq, slot + 1, sys_get_le16(finger), sys_get_le16(finger + 2),
+                sys_get_le16(finger + 4), sys_get_le16(finger + 6),
+                (frame->trackpad_flags >> (8 + slot)) & 1U);
+    }
+}
+#endif
 
 static bool iqs9151_finger1_valid(const struct iqs9151_frame *frame) {
     const bool finger1_confident =
@@ -2321,6 +2365,8 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
     data->diagnostic_step3_x = data->diagnostic_step3_y = 0;
     if (diagnose) {
         ++data->diagnostic_seq;
+        iqs9151_log_sensor_diagnostics(data, frame,
+                                      data->diagnostic_seq == 1U || prev_frame.finger_count == 0U);
         LOG_INF("GIN seq=%u t=%u fc=%u f1v=%u f1=%u,%u f2v=%u f2=%u,%u",
                 data->diagnostic_seq, (uint32_t)now_ms, frame->finger_count,
                 iqs9151_finger1_valid(frame), frame->finger1_x, frame->finger1_y,
@@ -2753,6 +2799,18 @@ static int iqs9151_init(const struct device *dev) {
     }
     LOG_DBG("ATI complete");
 
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    /* Read only, after setup/overrides and ATI, before event mode and our IRQ.
+     * An unavailable readback must not prevent the keyboard from starting. */
+    iqs9151_wait_for_ready(dev, 500);
+    const int diagnostic_ready = gpio_pin_get_dt(&cfg->irq_gpio);
+    data->diagnostic_config_rc = diagnostic_ready < 0 ? diagnostic_ready : -ETIMEDOUT;
+    if (diagnostic_ready > 0) {
+        data->diagnostic_config_rc = iqs9151_i2c_read(cfg, IQS9151_ADDR_TRACKPAD_SETTINGS,
+            data->diagnostic_config, sizeof(data->diagnostic_config));
+    }
+#endif
+
     // Setup IRQ Call Back
     k_work_init(&data->work, iqs9151_work_cb);
     k_work_init_delayable(&data->one_finger_click_work, iqs9151_one_finger_click_work_cb);
@@ -2811,6 +2869,9 @@ void iqs9151_test_context_init(void *ctx, const struct device *dev) {
     struct iqs9151_data *data = (struct iqs9151_data *)ctx;
 
     memset(data, 0, sizeof(*data));
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    data->diagnostic_config_rc = -EAGAIN;
+#endif
     data->dev = dev;
     k_work_init(&data->work, iqs9151_work_cb);
     k_work_init_delayable(&data->one_finger_click_work, iqs9151_one_finger_click_work_cb);
@@ -2872,6 +2933,26 @@ void iqs9151_test_set_event_hook(iqs9151_test_event_hook_t hook, void *user_data
     iqs9151_test_hook.hook = hook;
     iqs9151_test_hook.user_data = user_data;
 }
+
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+int iqs9151_test_process_raw(void *ctx, const uint8_t *raw, size_t length, int64_t now_ms) {
+    if (length != IQS9151_FRAME_READ_SIZE) {
+        return -EINVAL;
+    }
+    struct iqs9151_frame frame;
+    iqs9151_parse_frame(raw, &frame);
+    iqs9151_process_frame(ctx, &frame, now_ms);
+    return 0;
+}
+
+void iqs9151_test_set_diagnostic_config(void *ctx, const uint8_t *config, int rc) {
+    struct iqs9151_data *data = ctx;
+    data->diagnostic_config_rc = rc;
+    if (rc == 0) {
+        memcpy(data->diagnostic_config, config, sizeof(data->diagnostic_config));
+    }
+}
+#endif
 
 uint16_t iqs9151_test_hold_button(const void *ctx) {
     const struct iqs9151_data *data = (const struct iqs9151_data *)ctx;

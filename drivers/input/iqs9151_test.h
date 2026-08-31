@@ -52,6 +52,10 @@ uint8_t iqs9151_test_prev_finger_count(const void *ctx);
 bool iqs9151_test_cursor_inertia_active(const void *ctx);
 bool iqs9151_test_scroll_inertia_active(const void *ctx);
 void iqs9151_test_force_pinch_session(void *ctx, bool active);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+int iqs9151_test_process_raw(void *ctx, const uint8_t *raw, size_t length, int64_t now_ms);
+void iqs9151_test_set_diagnostic_config(void *ctx, const uint8_t *config, int rc);
+#endif
 #endif
 
 #endif /* ZEPHYR_DRIVERS_INPUT_IQS9151_TEST_H_ */
