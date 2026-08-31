@@ -1,3 +1,13 @@
+ZTEST_F(iqs9151_work_cb, test_scroll_report_failure_is_observed_without_retry) {
+    iqs9151_test_set_event_hook(NULL, NULL);
+    report_return_code = -EAGAIN;
+    struct iqs9151_test_frame frame = scroll_frame(3);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    scroll_move(&frame, 0, 60);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    zassert_equal(report_calls, 1, "Observation must not retry/drop/duplicate reports");
+}
+
 /* Exercise the production raw decoder, not just hand-built frame structs. */
 ZTEST_F(iqs9151_work_cb, test_raw_sensor_diagnostics_and_settings_snapshot) {
     uint8_t raw[72] = {0};

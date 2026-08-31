@@ -89,6 +89,45 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_stale_release_does_not_fling) {
     zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
 }
 
+/* Observed tail timing, synthetic movement: this preserves the current behavior. */
+ZTEST_F(iqs9151_work_cb, test_observed_staged_release_expires_inertia_history) {
+    struct iqs9151_test_frame frame = scroll_frame(3);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    scroll_move(&frame, 0, -60);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    scroll_move(&frame, 0, -143);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 23);
+    scroll_move(&frame, 0, -165);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 37);
+    fixture->log.count = 0;
+    const uint8_t counts[] = {2, 1, 0};
+    const int64_t times[] = {50, 75, 110};
+    for (size_t i = 0; i < ARRAY_SIZE(counts); i++) {
+        frame.finger_count = counts[i];
+        frame.trackpad_flags = counts[i] | IQS9151_TP_FINGER1_CONFIDENCE;
+        iqs9151_test_process_frame(fixture->ctx, &frame, times[i]);
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+        zassert_false(iqs9151_test_cursor_inertia_active(fixture->ctx));
+        zassert_equal(fixture->log.count, 0, "Staged tail must not emit new input");
+    }
+    k_sleep(K_MSEC(20));
+    zassert_equal(fixture->log.count, 0, "Rejected inertia must not produce worker output");
+}
+
+ZTEST_F(iqs9151_work_cb, test_scroll_inertia_stale_gap_boundary) {
+    for (int gap = 35; gap <= 36; gap++) {
+        iqs9151_work_cb_before(fixture);
+        struct iqs9151_test_frame frame = scroll_frame(3);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+        scroll_move(&frame, 0, 60);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+        frame = scroll_frame(0);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10 + gap);
+        zassert_equal(iqs9151_test_scroll_inertia_active(fixture->ctx), gap == 35);
+        iqs9151_test_cancel_pending_work(fixture->ctx);
+    }
+}
+
 ZTEST_F(iqs9151_work_cb, test_three_finger_resume_has_no_coordinate_jump) {
     struct iqs9151_test_frame frame = scroll_frame(3);
     iqs9151_test_process_frame(fixture->ctx, &frame, 0);

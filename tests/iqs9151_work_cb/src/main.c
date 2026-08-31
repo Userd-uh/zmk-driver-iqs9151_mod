@@ -22,6 +22,9 @@ struct iqs9151_work_cb_fixture {
     struct event_log log;
 };
 
+static int report_return_code;
+static int report_calls;
+
 int input_report(const struct device *dev,
                  uint8_t type, uint16_t code, int32_t value, bool sync,
                  k_timeout_t timeout) {
@@ -31,7 +34,8 @@ int input_report(const struct device *dev,
     ARG_UNUSED(value);
     ARG_UNUSED(sync);
     ARG_UNUSED(timeout);
-    return 0;
+    report_calls++;
+    return report_return_code;
 }
 
 static void record_event(const struct iqs9151_test_event *event, void *user_data) {
@@ -78,6 +82,8 @@ static void *iqs9151_work_cb_setup(void) {
 }
 
 static void iqs9151_work_cb_before(void *fixture_ptr) {
+    report_return_code = 0;
+    report_calls = 0;
     struct iqs9151_work_cb_fixture *fixture =
         (struct iqs9151_work_cb_fixture *)fixture_ptr;
 

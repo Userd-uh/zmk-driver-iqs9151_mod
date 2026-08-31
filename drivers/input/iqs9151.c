@@ -251,6 +251,7 @@ struct iqs9151_data {
     uint16_t three_last_y;
 #if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
     uint32_t diagnostic_seq;
+    uint32_t diagnostic_inertia_seq;
     int32_t diagnostic_step2_x, diagnostic_step2_y;
     int32_t diagnostic_step3_x, diagnostic_step3_y;
     int diagnostic_config_rc;
@@ -304,7 +305,14 @@ static int iqs9151_report_rel_event(const struct device *dev, uint16_t code,
         return 0;
     }
 #endif
-    return input_report_rel(dev, code, value, sync, timeout);
+    const int rc = input_report_rel(dev, code, value, sync, timeout);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    if (code == INPUT_REL_HWHEEL || code == INPUT_REL_WHEEL) {
+        LOG_INF("GIREPORT t=%u code=%u value=%d sync=%u rc=%d",
+                (uint32_t)k_uptime_get(), code, value, sync, rc);
+    }
+#endif
+    return rc;
 }
 
 static const uint8_t iqs9151_alp_compensation[] = {
@@ -805,6 +813,31 @@ static void iqs9151_motion_history_push(struct iqs9151_motion_history *history,
     }
 }
 
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+/* Called at the actual return site: no duplicate decision or state mutation.
+ * GIREL/GIGATE share device time; kind distinguishes cursor and scroll calls. */
+static void iqs9151_log_inertia_gate(const struct iqs9151_motion_history *history,
+                                     const struct iqs9151_inertia_gate_params *gate,
+                                     int64_t now_ms, uint8_t recent_count,
+                                     const char *reason) {
+    int32_t gap_ms = -1;
+    if (history->count != 0U) {
+        const uint8_t latest =
+            (history->head + IQS9151_INERTIA_MOTION_HISTORY_SIZE - 1U) %
+            IQS9151_INERTIA_MOTION_HISTORY_SIZE;
+        gap_ms = (int32_t)(now_ms - history->samples[latest].ms);
+    }
+    LOG_INF("GIGATE kind=%s t=%u reason=%s history=%u recent=%u gap=%d window=%u stale=%u min=%u speed=%d",
+            gate == &iqs9151_scroll_gate_params ? "scroll" : "cursor",
+            (uint32_t)now_ms, reason, history->count, recent_count, gap_ms,
+            gate->recent_window_ms, gate->stale_gap_ms, gate->min_samples, gate->min_avg_speed);
+}
+#define IQS9151_LOG_GATE(reason) \
+    iqs9151_log_inertia_gate(history, gate, now_ms, recent_count, reason)
+#else
+#define IQS9151_LOG_GATE(reason) do { } while (0)
+#endif
+
 static bool iqs9151_inertia_seed_from_history(
     const struct iqs9151_motion_history *history,
     const struct iqs9151_inertia_params *params,
@@ -838,11 +871,13 @@ static bool iqs9151_inertia_seed_from_history(
     }
 
     if (recent_count < gate->min_samples) {
+        IQS9151_LOG_GATE("recent_samples");
         return false;
     }
 
     latest_ms = recent[0].ms;
     if ((now_ms - latest_ms) > gate->stale_gap_ms) {
+        IQS9151_LOG_GATE("stale_gap");
         return false;
     }
 
@@ -853,6 +888,7 @@ static bool iqs9151_inertia_seed_from_history(
     }
 
     if (total_x == 0 && total_y == 0) {
+        IQS9151_LOG_GATE("zero_total");
         return false;
     }
 
@@ -875,6 +911,7 @@ static bool iqs9151_inertia_seed_from_history(
     }
 
     if (consistent_count < gate->min_samples) {
+        IQS9151_LOG_GATE("direction_samples");
         return false;
     }
 
@@ -887,6 +924,7 @@ static bool iqs9151_inertia_seed_from_history(
                            params->interval_ms) /
                           span_ms);
     if (avg_speed < gate->min_avg_speed) {
+        IQS9151_LOG_GATE("slow");
         return false;
     }
 
@@ -894,6 +932,7 @@ static bool iqs9151_inertia_seed_from_history(
                             span_ms);
     *seed_vy_fp = (int32_t)((((int64_t)total_y * params->interval_ms) << params->fp_shift) /
                             span_ms);
+    IQS9151_LOG_GATE("accepted");
     return true;
 }
 
@@ -1931,6 +1970,12 @@ static void iqs9151_inertia_scroll_work_cb(struct k_work *work) {
     const bool active =
         iqs9151_inertia_step(&data->inertia_scroll, &iqs9151_scroll_params, &out_x, &out_y);
 
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+    LOG_INF("GIWORK seq=%u n=%u t=%u scroll=%d,%d active=%u elapsed=%u",
+            data->diagnostic_seq, ++data->diagnostic_inertia_seq,
+            (uint32_t)k_uptime_get(), out_x, out_y, active, data->inertia_scroll.elapsed_ms);
+#endif
+
     if (out_x > INT16_MAX) {
         out_x = INT16_MAX;
     } else if (out_x < INT16_MIN) {
@@ -2250,6 +2295,12 @@ static void iqs9151_update_inertia_ema(struct iqs9151_data *data,
     /* Cancel Inertial */
     if (two_result->scroll_started || frame->finger_count == 2U ||
         frame->finger_count == 3U || finger1_started) {
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+        if (data->inertia_scroll.active) {
+            LOG_INF("GICANCEL seq=%u t=%u reason=touch fc=%u",
+                    data->diagnostic_seq, (uint32_t)now_ms, frame->finger_count);
+        }
+#endif
         iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
         iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);
     }
@@ -2295,6 +2346,12 @@ static void iqs9151_update_inertia_ema(struct iqs9151_data *data,
 
     /* Inertial Scrolling */
     if (two_result->scroll_ended) {
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+        LOG_INF("GIREL version=1 seq=%u t=%u fc=%u history=%u enabled=%u",
+                data->diagnostic_seq, (uint32_t)now_ms, frame->finger_count,
+                data->scroll_motion_history.count,
+                IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_INERTIA_ENABLE));
+#endif
         if (IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_INERTIA_ENABLE) &&
             iqs9151_inertia_seed_from_history(&data->scroll_motion_history,
                                               &iqs9151_scroll_params,
@@ -2302,6 +2359,11 @@ static void iqs9151_update_inertia_ema(struct iqs9151_data *data,
                                               &seed_vx_fp, &seed_vy_fp)) {
             iqs9151_inertia_start(&data->inertia_scroll, &data->inertia_scroll_work,
                                   &iqs9151_scroll_params, seed_vx_fp, seed_vy_fp);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+            LOG_INF("GISTART seq=%u t=%u seed=%d,%d active=%u",
+                    data->diagnostic_seq, (uint32_t)now_ms,
+                    seed_vx_fp, seed_vy_fp, data->inertia_scroll.active);
+#endif
         }
         iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
         iqs9151_motion_history_reset(&data->scroll_motion_history);

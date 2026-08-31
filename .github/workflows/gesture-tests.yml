@@ -47,5 +47,5 @@ jobs:
           if [[ '${{ matrix.mode }}' = diagnostics || '${{ matrix.mode }}' = split-* ]]; then
             python3 ../driver/tests/iqs9151_work_cb/check_diagnostics.py test-output.log
           else
-            ! strings build/zephyr/zephyr.exe | grep 'GIN seq='
+            ! strings build/zephyr/zephyr.exe | grep -E 'GIN seq=|GIGATE kind=|GIREL version=|GIWORK seq=|GIREPORT t='
           fi
