@@ -1,4 +1,8 @@
 tests:
+  iqs9151.scroll_pipeline:
+    tags: [iqs9151, input]
+    platform_allow: [native_sim_64]
+    extra_args: IQS_SCROLL_PIPELINE=1
   iqs9151.work_cb:
     tags:
       - iqs9151

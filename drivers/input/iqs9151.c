@@ -1464,6 +1464,11 @@ static void iqs9151_two_finger_update(struct iqs9151_data *data,
     iqs9151_two_finger_reset(state);
 }
 
+static bool iqs9151_three_finger_scrolling(const struct iqs9151_data *data) {
+    return data->three_mode == IQS9151_3F_MODE_HORIZONTAL_SCROLL ||
+           data->three_mode == IQS9151_3F_MODE_VERTICAL_SCROLL;
+}
+
 static void iqs9151_three_finger_reset(struct iqs9151_data *data) {
     data->three_active = false;
     data->three_hold_sent = false;
@@ -1485,7 +1490,8 @@ static void iqs9151_three_finger_reset(struct iqs9151_data *data) {
 static bool iqs9151_three_finger_update(struct iqs9151_data *data,
                                         const struct iqs9151_frame *frame,
                                         const struct iqs9151_frame *prev_frame,
-                                        const struct device *dev) {
+                                        const struct device *dev,
+                                        struct iqs9151_two_finger_result *result) {
     const bool finger1_valid = iqs9151_finger1_valid(frame);
     const bool one_lead_tap_candidate = data->three_finger_one_lead_valid;
     const bool two_lead_tap_candidate = data->three_finger_two_lead_valid;
@@ -1597,6 +1603,7 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
                 if (configured_mode == IQS9151_GESTURE_SCROLL) {
                     data->three_mode = horizontal ? IQS9151_3F_MODE_HORIZONTAL_SCROLL
                                                   : IQS9151_3F_MODE_VERTICAL_SCROLL;
+                    result->scroll_started = true;
                     data->three_tap_candidate = false;
                 } else if (configured_mode == IQS9151_GESTURE_ACTION) {
                     const uint16_t key = horizontal
@@ -1610,13 +1617,15 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
                 }
             }
         }
-        if (data->three_mode == IQS9151_3F_MODE_HORIZONTAL_SCROLL && step_x != 0) {
-            iqs9151_report_rel_event(dev, INPUT_REL_HWHEEL, (int16_t)-step_x, true, K_NO_WAIT);
-            return true;
-        }
-        if (data->three_mode == IQS9151_3F_MODE_VERTICAL_SCROLL && step_y != 0) {
-            iqs9151_report_rel_event(dev, INPUT_REL_WHEEL, (int16_t)step_y, true, K_NO_WAIT);
-            return true;
+        /* Share REL reporting, velocity history, fixed-point inertia and downstream
+         * scaler remainders with 2F. Do not quantize small steps into wheel notches. */
+        if (iqs9151_three_finger_scrolling(data)) {
+            result->scroll_active = true;
+            if (data->three_mode == IQS9151_3F_MODE_HORIZONTAL_SCROLL) {
+                result->scroll_x = (int16_t)CLAMP(step_x, INT16_MIN, INT16_MAX);
+            } else {
+                result->scroll_y = (int16_t)CLAMP(step_y, INT16_MIN, INT16_MAX);
+            }
         }
         return true;
     }
@@ -1625,6 +1634,8 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
      * Do not reinterpret 3->2->1 as a new 2F action or pointer gesture. */
     if (data->three_mode != IQS9151_3F_MODE_NONE && !data->three_tapdrag_second_touch) {
         if (frame->finger_count == 0U) {
+            /* End once, after the whole 3->2->1->0 tail; retain history until then. */
+            result->scroll_ended = iqs9151_three_finger_scrolling(data);
             iqs9151_three_finger_reset(data);
         } else {
             data->three_release_pending = true;
@@ -2131,7 +2142,7 @@ static bool iqs9151_update_gesture_sessions(struct iqs9151_data *data,
         iqs9151_two_finger_update(data, frame, prev_frame, dev, two_result);
     }
     if (frame->finger_count != 3U && data->three_active) {
-        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev);
+        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result);
     }
 
     switch (frame->finger_count) {
@@ -2148,7 +2159,7 @@ static bool iqs9151_update_gesture_sessions(struct iqs9151_data *data,
         }
         break;
     case 3U:
-        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev);
+        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result);
         break;
     default:
         break;
@@ -2173,7 +2184,8 @@ static void iqs9151_update_inertia_ema(struct iqs9151_data *data,
     int32_t seed_vy_fp;
 
     /* Cancel Inertial */
-    if (two_result->scroll_started || frame->finger_count == 2U || finger1_started) {
+    if (two_result->scroll_started || frame->finger_count == 2U ||
+        frame->finger_count == 3U || finger1_started) {
         iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
         iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);
     }
@@ -2295,11 +2307,13 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
                             !data->three_tapdrag_second_touch;
 
     if (frame->finger_count == 3U || data->three_active) {
-        iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);
+        if (!iqs9151_three_finger_scrolling(data)) {
+            iqs9151_inertia_cancel(&data->inertia_scroll, &data->inertia_scroll_work);
+            iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
+            iqs9151_motion_history_reset(&data->scroll_motion_history);
+        }
         iqs9151_inertia_cancel(&data->inertia_cursor, &data->inertia_cursor_work);
-        iqs9151_ema_reset(&data->scroll_ema_x_fp, &data->scroll_ema_y_fp);
         iqs9151_ema_reset(&data->cursor_ema_x_fp, &data->cursor_ema_y_fp);
-        iqs9151_motion_history_reset(&data->scroll_motion_history);
         iqs9151_motion_history_reset(&data->cursor_motion_history);
     }
 
