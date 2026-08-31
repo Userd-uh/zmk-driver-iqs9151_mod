@@ -9,7 +9,7 @@
 
 #include <string.h>
 
-#define IQS9151_TEST_CTX_BUF_SIZE 1536
+#define IQS9151_TEST_CTX_BUF_SIZE 2048
 #define IQS9151_TEST_MAX_EVENTS 32
 
 struct event_log {
