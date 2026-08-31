@@ -1434,4 +1434,22 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
 #include "sensor_diagnostics.inc"
 #endif
 
+ZTEST_F(iqs9151_work_cb, test_initial_split_comparison_preserves_adjacent_settings) {
+    size_t length;
+    const uint8_t *config = iqs9151_test_initial_config(&length);
+    zassert_equal(length, 0x11f6 - 0x1178);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS) && \
+    defined(CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR)
+    zassert_equal(config[0x11f1 - 0x1178], CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR);
+#else
+    zassert_equal(config[0x11f1 - 0x1178], 3);
+#endif
+    zassert_equal(config[0x11f0 - 0x1178], 5);
+    zassert_equal(config[0x11f2 - 0x1178], 20);
+    zassert_equal(config[0x11f3 - 0x1178], 20);
+    zassert_equal(config[0x11f4 - 0x1178], 2);
+    zassert_equal(config[0x11f5 - 0x1178], 20);
+    zassert_equal(config[0x11e5 - 0x1178], 3);
+}
+
 ZTEST_SUITE(iqs9151_work_cb, NULL, iqs9151_work_cb_setup, iqs9151_work_cb_before, NULL, NULL);

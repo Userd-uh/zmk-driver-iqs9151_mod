@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [default, 0, 1, 2, scroll-pipeline, diagnostics]
+        mode: [default, 0, 1, 2, scroll-pipeline, diagnostics, split-2, split-4]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -30,7 +30,10 @@ jobs:
         shell: bash
         run: |
           args=()
-          if [ '${{ matrix.mode }}' = diagnostics ]; then
+          if [[ '${{ matrix.mode }}' = split-* ]]; then
+            mode='${{ matrix.mode }}'
+            args+=('-DIQS_SCROLL_PIPELINE=1' '-DIQS_DIAGNOSTICS=1' '-DEXTRA_CONF_FILE=diagnostics.conf' "-DIQS_SPLIT_FACTOR=${mode#split-}")
+          elif [ '${{ matrix.mode }}' = diagnostics ]; then
             args+=('-DIQS_SCROLL_PIPELINE=1' '-DIQS_DIAGNOSTICS=1' '-DEXTRA_CONF_FILE=diagnostics.conf')
           elif [ '${{ matrix.mode }}' = scroll-pipeline ]; then
             args+=('-DIQS_SCROLL_PIPELINE=1')
@@ -41,7 +44,7 @@ jobs:
           west build -s ../driver/tests/iqs9151_work_cb -b native_sim_64 -d build -- -DZMK_APP_DIR="$PWD/app" "${args[@]}"
           set -o pipefail
           build/zephyr/zephyr.exe | tee test-output.log
-          if [ '${{ matrix.mode }}' = diagnostics ]; then
+          if [[ '${{ matrix.mode }}' = diagnostics || '${{ matrix.mode }}' = split-* ]]; then
             python3 ../driver/tests/iqs9151_work_cb/check_diagnostics.py test-output.log
           else
             ! strings build/zephyr/zephyr.exe | grep 'GIN seq='

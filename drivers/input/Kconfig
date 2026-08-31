@@ -33,6 +33,16 @@ config INPUT_IQS9151_GESTURE_DIAGNOSTICS
       Diagnostics read all seven finger slots in one 72-byte transaction
       (normal builds read 28 bytes), plus a one-time boot settings readback.
 
+config INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR
+    int "Experimental finger split factor (diagnostics only)"
+    depends on INPUT_IQS9151_GESTURE_DIAGNOSTICS
+    range 2 4
+    default 3
+    help
+      Controlled comparison around the existing value 3. Changes only the
+      initial sensor register at 0x11F1, before ATI. Production builds keep
+      the original setting. Do not assume a larger value is more effective.
+
 config INPUT_IQS9151_INIT_PRIORITY
     int "IQS9151 init priority"
     default 80

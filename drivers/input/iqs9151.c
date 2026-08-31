@@ -440,7 +440,12 @@ static const uint8_t iqs9151_main_config[] = {
     XY_DYNAMIC_FILTER_BOTTOM_BETA,
     XY_DYNAMIC_FILTER_STATIC_FILTER_BETA,
     STATIONARY_TOUCH_MOV_THRESHOLD,
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS) && \
+    defined(CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR)
+    CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR,
+#else
     FINGER_SPLIT_FACTOR,
+#endif
     X_TRIM_VALUE,
     Y_TRIM_VALUE,
     JITTER_FILTER_DELTA,
@@ -2863,6 +2868,11 @@ static int iqs9151_init(const struct device *dev) {
 #ifdef CONFIG_INPUT_IQS9151_TEST
 size_t iqs9151_test_context_size(void) {
     return sizeof(struct iqs9151_data);
+}
+
+const uint8_t *iqs9151_test_initial_config(size_t *length) {
+    *length = sizeof(iqs9151_main_config);
+    return iqs9151_main_config;
 }
 
 void iqs9151_test_context_init(void *ctx, const struct device *dev) {
