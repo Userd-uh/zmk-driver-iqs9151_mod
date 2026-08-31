@@ -85,7 +85,7 @@ static void iqs9151_work_cb_before(void *fixture_ptr) {
     iqs9151_test_set_event_hook(record_event, &fixture->log);
 }
 
-#ifndef IQS_GESTURE_MATRIX
+#if !defined(IQS_GESTURE_MATRIX) && !defined(IQS_SCROLL_PIPELINE)
 ZTEST_F(iqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
     const struct iqs9151_test_frame show_reset_frame =
         make_frame(2U, 2U, 0, 0, IQS9151_INFO_SHOW_RESET, 0, 0, 0, 0);
@@ -1421,7 +1421,11 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
 }
 
 #else
+#if defined(IQS_SCROLL_PIPELINE)
+#include "scroll_pipeline.inc"
+#else
 #include "gesture_matrix.inc"
+#endif
 #endif
 
 ZTEST_SUITE(iqs9151_work_cb, NULL, iqs9151_work_cb_setup, iqs9151_work_cb_before, NULL, NULL);
