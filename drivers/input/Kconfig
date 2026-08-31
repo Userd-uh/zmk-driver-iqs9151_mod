@@ -13,12 +13,35 @@ if INPUT_IQS9151
 config INPUT_IQS9151_LOG_LEVEL
     int "IQS9151 log level"
     range 0 4
+    default 3 if INPUT_IQS9151_GESTURE_DIAGNOSTICS
     default INPUT_LOG_LEVEL if LOG
     default 0
     help
       Log level for the IQS9151 driver module.
       0: none, 1: err, 2: wrn, 3: inf, 4: dbg.
       Defaults to INPUT_LOG_LEVEL to follow input subsystem policy.
+
+config INPUT_IQS9151_GESTURE_DIAGNOSTICS
+    bool "Temporary per-frame gesture diagnostics"
+    depends on LOG
+    default n
+    help
+      Log raw coordinates, actual gesture steps and scroll results at INFO level.
+      Set INPUT_IQS9151_LOG_LEVEL to at least 3. Diagnostic state and logging
+      are compiled out when disabled. Use only for short diagnostic captures;
+      logging can affect timing. Does not change gesture modes or gains.
+      Diagnostics read all seven finger slots in one 72-byte transaction
+      (normal builds read 28 bytes), plus a one-time boot settings readback.
+
+config INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR
+    int "Experimental finger split factor (diagnostics only)"
+    depends on INPUT_IQS9151_GESTURE_DIAGNOSTICS
+    range 2 4
+    default 3
+    help
+      Controlled comparison around the existing value 3. Changes only the
+      initial sensor register at 0x11F1, before ATI. Production builds keep
+      the original setting. Do not assume a larger value is more effective.
 
 config INPUT_IQS9151_INIT_PRIORITY
     int "IQS9151 init priority"
@@ -238,20 +261,32 @@ config INPUT_IQS9151_2F_HORIZONTAL_NAV
     help
       When enabled, two-finger horizontal movement does not emit REL_HWHEEL.
       After the gesture ends, if horizontal movement dominates and exceeds the
-      navigation threshold, the driver emits INPUT_BTN_3 / INPUT_BTN_4 (same
-      codes as three-finger horizontal swipe). ZMK keymaps can bind these via
+      navigation threshold, the driver emits INPUT_BTN_3 / INPUT_BTN_4.
+      Three-finger Action uses separate codes. ZMK keymaps can bind these via
       tp_to_pos (e.g. MB4/MB5 back/forward). Vertical two-finger scroll is
       unchanged when INPUT_IQS9151_SCROLL_Y_ENABLE is set.
 
 config INPUT_IQS9151_2F_NAV_SWIPE_THRESHOLD
     int "Two-finger navigation swipe threshold"
-    depends on INPUT_IQS9151_2F_HORIZONTAL_NAV
     range 1 2000
     default 200
     help
-      Minimum accumulated horizontal centroid movement (same scale as the
-      three-finger swipe threshold) to emit INPUT_BTN_3 or INPUT_BTN_4 when
-      INPUT_IQS9151_2F_HORIZONTAL_NAV is enabled.
+      Minimum accumulated centroid movement on the dominant axis to emit a
+      two-finger Action when that axis mode is 2 (action). Applies to both
+      horizontal and vertical movement.
+
+config INPUT_IQS9151_2F_HORIZONTAL_MODE
+    int "Two-finger horizontal action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 2 if INPUT_IQS9151_2F_HORIZONTAL_NAV
+    default 0 if !INPUT_IQS9151_SCROLL_X_ENABLE
+    default 1
+
+config INPUT_IQS9151_2F_VERTICAL_MODE
+    int "Two-finger vertical action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 0 if !INPUT_IQS9151_SCROLL_Y_ENABLE
+    default 1
 
 config INPUT_IQS9151_2F_SCROLL_START_MOVE
     int "IQS9151 two-finger scroll start threshold"
@@ -368,6 +403,16 @@ config INPUT_IQS9151_3F_SWIPE_THRESHOLD
     default 200
     help
       Three-finger swipe threshold (driver-side).
+
+config INPUT_IQS9151_3F_HORIZONTAL_MODE
+    int "Three-finger horizontal action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 2
+
+config INPUT_IQS9151_3F_VERTICAL_MODE
+    int "Three-finger vertical action mode (0=disabled, 1=scroll, 2=action)"
+    range 0 2
+    default 2
 
 config INPUT_IQS9151_TEST
     bool "IQS9151 test hooks"

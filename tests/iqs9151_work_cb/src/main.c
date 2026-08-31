@@ -1,12 +1,15 @@
 #include <zephyr/input/input.h>
 #include <zephyr/ztest.h>
+#include <zephyr/sys/byteorder.h>
+#include <errno.h>
+#include <dt-bindings/input/iqs9151-gestures.h>
 
 #include "iqs9151_regs.h"
 #include "iqs9151_test.h"
 
 #include <string.h>
 
-#define IQS9151_TEST_CTX_BUF_SIZE 1536
+#define IQS9151_TEST_CTX_BUF_SIZE 2048
 #define IQS9151_TEST_MAX_EVENTS 32
 
 struct event_log {
@@ -19,6 +22,9 @@ struct iqs9151_work_cb_fixture {
     struct event_log log;
 };
 
+static int report_return_code;
+static int report_calls;
+
 int input_report(const struct device *dev,
                  uint8_t type, uint16_t code, int32_t value, bool sync,
                  k_timeout_t timeout) {
@@ -28,7 +34,8 @@ int input_report(const struct device *dev,
     ARG_UNUSED(value);
     ARG_UNUSED(sync);
     ARG_UNUSED(timeout);
-    return 0;
+    report_calls++;
+    return report_return_code;
 }
 
 static void record_event(const struct iqs9151_test_event *event, void *user_data) {
@@ -75,6 +82,8 @@ static void *iqs9151_work_cb_setup(void) {
 }
 
 static void iqs9151_work_cb_before(void *fixture_ptr) {
+    report_return_code = 0;
+    report_calls = 0;
     struct iqs9151_work_cb_fixture *fixture =
         (struct iqs9151_work_cb_fixture *)fixture_ptr;
 
@@ -84,6 +93,7 @@ static void iqs9151_work_cb_before(void *fixture_ptr) {
     iqs9151_test_set_event_hook(record_event, &fixture->log);
 }
 
+#if !defined(IQS_GESTURE_MATRIX) && !defined(IQS_SCROLL_PIPELINE)
 ZTEST_F(iqs9151_work_cb, test_show_reset_releases_pinch_and_clears_state) {
     const struct iqs9151_test_frame show_reset_frame =
         make_frame(2U, 2U, 0, 0, IQS9151_INFO_SHOW_RESET, 0, 0, 0, 0);
@@ -1355,10 +1365,10 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_right_emits_btn3_click) {
 
     zassert_equal(fixture->log.count, 2U, "Expected BTN3 click (press + release)");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_3, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_RIGHT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN3 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_3, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_RIGHT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN3 release");
 }
 
@@ -1383,10 +1393,10 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_continuous_touch_emits_once) {
     zassert_equal(fixture->log.count, 2U,
                   "Expected a single BTN3 click while 3 fingers stay on pad");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_3, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_RIGHT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN3 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_3, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_RIGHT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN3 release");
 }
 
@@ -1411,11 +1421,75 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
     zassert_equal(fixture->log.count, 2U,
                   "Expected a single BTN4 click while 3 fingers stay on pad");
     zassert_equal(fixture->log.events[0].type, IQS9151_TEST_EVENT_KEY, "Event[0] not key");
-    zassert_equal(fixture->log.events[0].code, INPUT_BTN_4, "Event[0] unexpected code");
+    zassert_equal(fixture->log.events[0].code, IQS9151_BTN_3F_LEFT, "Event[0] unexpected code");
     zassert_equal(fixture->log.events[0].value, 1, "Event[0] should be BTN4 press");
     zassert_equal(fixture->log.events[1].type, IQS9151_TEST_EVENT_KEY, "Event[1] not key");
-    zassert_equal(fixture->log.events[1].code, INPUT_BTN_4, "Event[1] unexpected code");
+    zassert_equal(fixture->log.events[1].code, IQS9151_BTN_3F_LEFT, "Event[1] unexpected code");
     zassert_equal(fixture->log.events[1].value, 0, "Event[1] should be BTN4 release");
+}
+
+#else
+#if defined(IQS_SCROLL_PIPELINE)
+#include "scroll_pipeline.inc"
+#else
+#include "gesture_matrix.inc"
+#endif
+#endif
+
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+#include "sensor_diagnostics.inc"
+#endif
+
+ZTEST_F(iqs9151_work_cb, test_tap_and_pinch_do_not_save_three_finger_release) {
+    struct iqs9151_test_frame frame = make_frame(3, 0x303, 0, 0, 0, 1000, 1000, 1200, 1000);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    for (int count = 2; count >= 0; count--) {
+        frame.finger_count = count;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10 + (2-count)*5);
+        zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+    }
+    iqs9151_work_cb_before(fixture);
+    iqs9151_test_force_pinch_session(fixture->ctx, true);
+    frame.finger_count = 1;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 30);
+    zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+    zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+}
+
+#if !defined(IQS_GESTURE_MATRIX) && !defined(IQS_SCROLL_PIPELINE)
+ZTEST_F(iqs9151_work_cb, test_action_does_not_save_three_finger_release) {
+    struct iqs9151_test_frame frame = make_frame(3, 0x303, 0, 0, 0, 1000, 1000, 1200, 1000);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    frame.finger1_x += 400;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    zassert_equal(fixture->log.count, 2, "Action key press/release must remain intact");
+    for (int count = 2; count >= 0; count--) {
+        frame.finger_count = count;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 20 + (2-count)*5);
+        zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+        zassert_equal(fixture->log.count, 2);
+    }
+}
+#endif
+
+ZTEST_F(iqs9151_work_cb, test_initial_split_comparison_preserves_adjacent_settings) {
+    size_t length;
+    const uint8_t *config = iqs9151_test_initial_config(&length);
+    zassert_equal(length, 0x11f6 - 0x1178);
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS) && \
+    defined(CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR)
+    zassert_equal(config[0x11f1 - 0x1178], CONFIG_INPUT_IQS9151_DIAGNOSTIC_SPLIT_FACTOR);
+#else
+    zassert_equal(config[0x11f1 - 0x1178], 3);
+#endif
+    zassert_equal(config[0x11f0 - 0x1178], 5);
+    zassert_equal(config[0x11f2 - 0x1178], 20);
+    zassert_equal(config[0x11f3 - 0x1178], 20);
+    zassert_equal(config[0x11f4 - 0x1178], 2);
+    zassert_equal(config[0x11f5 - 0x1178], 20);
+    zassert_equal(config[0x11e5 - 0x1178], 3);
 }
 
 ZTEST_SUITE(iqs9151_work_cb, NULL, iqs9151_work_cb_setup, iqs9151_work_cb_before, NULL, NULL);
