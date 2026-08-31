@@ -89,8 +89,8 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_stale_release_does_not_fling) {
     zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
 }
 
-/* Observed tail timing, synthetic movement: this preserves the current behavior. */
-ZTEST_F(iqs9151_work_cb, test_observed_staged_release_expires_inertia_history) {
+/* Observed tail timing, synthetic movement: snapshot at 50, start only at 110. */
+ZTEST_F(iqs9151_work_cb, test_observed_staged_release_preserves_inertia_history) {
     struct iqs9151_test_frame frame = scroll_frame(3);
     iqs9151_test_process_frame(fixture->ctx, &frame, 0);
     scroll_move(&frame, 0, -60);
@@ -106,12 +106,113 @@ ZTEST_F(iqs9151_work_cb, test_observed_staged_release_expires_inertia_history) {
         frame.finger_count = counts[i];
         frame.trackpad_flags = counts[i] | IQS9151_TP_FINGER1_CONFIDENCE;
         iqs9151_test_process_frame(fixture->ctx, &frame, times[i]);
-        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+        zassert_equal(iqs9151_test_scroll_inertia_active(fixture->ctx), counts[i] == 0);
         zassert_false(iqs9151_test_cursor_inertia_active(fixture->ctx));
         zassert_equal(fixture->log.count, 0, "Staged tail must not emit new input");
     }
+    iqs9151_test_process_frame(fixture->ctx, &frame, 111);
+    zassert_equal(fixture->log.count, 0, "Repeated idle must not emit release input");
     k_sleep(K_MSEC(20));
-    zassert_equal(fixture->log.count, 0, "Rejected inertia must not produce worker output");
+    zassert_true(fixture->log.count > 0, "Saved release must produce inertia after all up");
+    for (size_t i = 0; i < fixture->log.count; i++) {
+        zassert_equal(fixture->log.events[i].code, INPUT_REL_HWHEEL);
+        zassert_true(fixture->log.events[i].value > 0);
+    }
+}
+
+ZTEST_F(iqs9151_work_cb, test_three_finger_long_remaining_contact_keeps_release_snapshot) {
+    struct iqs9151_test_frame frame = scroll_frame(3);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    scroll_move(&frame, 0, 60);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    frame.finger_count = 2;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 23);
+    fixture->log.count = 0;
+    frame.finger_count = 1;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 1000);
+    k_sleep(K_MSEC(20));
+    zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+    zassert_equal(fixture->log.count, 0);
+    frame.finger_count = 0;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 5010);
+    zassert_true(iqs9151_test_scroll_inertia_active(fixture->ctx));
+    zassert_equal(fixture->log.count, 0);
+    iqs9151_test_cancel_pending_work(fixture->ctx);
+}
+
+ZTEST_F(iqs9151_work_cb, test_three_finger_resume_discards_old_fling_and_allows_fresh_motion) {
+    for (int fresh = 0; fresh <= 1; fresh++) {
+        iqs9151_work_cb_before(fixture);
+        struct iqs9151_test_frame frame = scroll_frame(3);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+        scroll_move(&frame, 0, 60);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+        frame.finger_count = 2;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 20);
+        frame.finger_count = 3;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 25);
+        fixture->log.count = 0;
+        if (fresh) {
+            scroll_move(&frame, 0, -60);
+            iqs9151_test_process_frame(fixture->ctx, &frame, 30);
+            fixture->log.count = 0;
+        }
+        frame.finger_count = 0;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 40);
+        zassert_equal(iqs9151_test_scroll_inertia_active(fixture->ctx), fresh != 0);
+        k_sleep(K_MSEC(20));
+        if (fresh) {
+            zassert_true(fixture->log.count > 0);
+            for (size_t i = 0; i < fixture->log.count; i++) {
+                zassert_equal(fixture->log.events[i].code, INPUT_REL_HWHEEL);
+                zassert_true(fixture->log.events[i].value > 0, "Must use fresh opposite direction");
+            }
+        } else {
+            zassert_equal(fixture->log.count, 0, "No stale candidate after recontact");
+        }
+    }
+}
+
+ZTEST_F(iqs9151_work_cb, test_remaining_finger_count_increase_invalidates_release) {
+    struct iqs9151_test_frame frame = scroll_frame(3);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    scroll_move(&frame, 0, 60);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    fixture->log.count = 0;
+    const uint8_t counts[] = {2, 1, 2, 0};
+    for (size_t i = 0; i < ARRAY_SIZE(counts); i++) {
+        frame.finger_count = counts[i];
+        iqs9151_test_process_frame(fixture->ctx, &frame, 15 + i * 5);
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+        zassert_false(iqs9151_test_cursor_inertia_active(fixture->ctx));
+        zassert_equal(fixture->log.count, 0);
+    }
+}
+
+ZTEST_F(iqs9151_work_cb, test_three_finger_stale_before_first_drop_stays_rejected) {
+    struct iqs9151_test_frame frame = scroll_frame(3);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    scroll_move(&frame, 0, 60);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    frame.finger_count = 2;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 46);
+    frame.finger_count = 0;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 1000);
+    zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+}
+
+ZTEST_F(iqs9151_work_cb, test_two_finger_release_gate_is_unchanged) {
+    for (int gap = 35; gap <= 36; gap++) {
+        iqs9151_work_cb_before(fixture);
+        struct iqs9151_test_frame frame = scroll_frame(2);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+        scroll_move(&frame, 0, 60);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+        frame = scroll_frame(0);
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10 + gap);
+        zassert_equal(iqs9151_test_scroll_inertia_active(fixture->ctx), gap == 35);
+        iqs9151_test_cancel_pending_work(fixture->ctx);
+    }
 }
 
 ZTEST_F(iqs9151_work_cb, test_scroll_inertia_stale_gap_boundary) {

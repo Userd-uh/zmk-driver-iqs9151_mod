@@ -44,8 +44,12 @@ for tail in re.split(r"GCFG seq=", text)[1:]:
         assert "GCFGV" not in tail and "GCFGF" not in tail
 print("Verified seven raw finger slots, raw flags and success/failure readback logs")
 
-assert re.search(r"GIREL version=1 seq=\d+ t=110 fc=0 history=3 enabled=1", text)
-assert re.search(r"GIGATE kind=scroll t=110 reason=recent_samples history=3 recent=0 gap=73 window=60 stale=35 min=1 speed=4", text)
+assert re.search(r"GISAVE seq=\d+ t=50 fc=2 history=3", text)
+assert re.search(r"GIREL version=2 seq=\d+ t=110 fc=0 history=3 enabled=1 eval=50 saved=1", text)
+assert re.search(r"GIGATE kind=scroll t=50 reason=accepted history=3 recent=3 gap=13 window=60 stale=35 min=1 speed=4", text)
+assert len(re.findall(r"GISTART seq=\d+ t=110 ", text)) == 1
+assert not re.search(r"GIREL version=2 seq=\d+ t=111 ", text)
+assert re.search(r"GIREL version=2 seq=\d+ t=5010 fc=0 history=1 enabled=1 eval=23 saved=1", text)
 assert re.search(r"GIGATE kind=scroll t=46 reason=stale_gap .*gap=36 ", text)
 assert re.search(r"GIGATE kind=scroll t=45 reason=accepted .*gap=35 ", text)
 assert re.search(r"GISTART seq=\d+ t=45 seed=-?\d+,-?\d+ active=1", text)

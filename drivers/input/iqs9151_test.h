@@ -52,6 +52,7 @@ void iqs9151_test_force_hold_button(void *ctx, uint16_t button);
 uint8_t iqs9151_test_prev_finger_count(const void *ctx);
 bool iqs9151_test_cursor_inertia_active(const void *ctx);
 bool iqs9151_test_scroll_inertia_active(const void *ctx);
+bool iqs9151_test_three_release_saved(const void *ctx);
 void iqs9151_test_force_pinch_session(void *ctx, bool active);
 #if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
 int iqs9151_test_process_raw(void *ctx, const uint8_t *raw, size_t length, int64_t now_ms);

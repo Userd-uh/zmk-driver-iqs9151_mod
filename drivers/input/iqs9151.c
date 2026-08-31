@@ -156,6 +156,8 @@ struct iqs9151_two_finger_result {
     bool scroll_active;
     bool scroll_started;
     bool scroll_ended;
+    bool scroll_release_saved;
+    int64_t scroll_release_ms;
     bool pinch_active;
     bool pinch_started;
     bool pinch_ended;
@@ -220,6 +222,9 @@ struct iqs9151_data {
     int32_t cursor_ema_x_fp;
     int32_t cursor_ema_y_fp;
     struct iqs9151_motion_history scroll_motion_history;
+    struct iqs9151_motion_history three_release_history;
+    int64_t three_scroll_release_ms;
+    bool three_scroll_release_valid;
     struct iqs9151_motion_history cursor_motion_history;
     struct iqs9151_one_finger_state one_finger;
     struct iqs9151_two_finger_state two_finger;
@@ -815,7 +820,7 @@ static void iqs9151_motion_history_push(struct iqs9151_motion_history *history,
 
 #if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
 /* Called at the actual return site: no duplicate decision or state mutation.
- * GIREL/GIGATE share device time; kind distinguishes cursor and scroll calls. */
+ * GIGATE t is GIREL eval (saved release time for staged 3F releases). */
 static void iqs9151_log_inertia_gate(const struct iqs9151_motion_history *history,
                                      const struct iqs9151_inertia_gate_params *gate,
                                      int64_t now_ms, uint8_t recent_count,
@@ -1568,6 +1573,9 @@ static bool iqs9151_three_finger_scrolling(const struct iqs9151_data *data) {
 }
 
 static void iqs9151_three_finger_reset(struct iqs9151_data *data) {
+    data->three_scroll_release_valid = false;
+    data->three_scroll_release_ms = 0;
+    iqs9151_motion_history_reset(&data->three_release_history);
     data->three_active = false;
     data->three_hold_sent = false;
     data->three_swipe_sent = false;
@@ -1589,7 +1597,8 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
                                         const struct iqs9151_frame *frame,
                                         const struct iqs9151_frame *prev_frame,
                                         const struct device *dev,
-                                        struct iqs9151_two_finger_result *result) {
+                                        struct iqs9151_two_finger_result *result,
+                                        int64_t frame_ms) {
     const bool finger1_valid = iqs9151_finger1_valid(frame);
     const bool one_lead_tap_candidate = data->three_finger_one_lead_valid;
     const bool two_lead_tap_candidate = data->three_finger_two_lead_valid;
@@ -1654,6 +1663,12 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
         const int64_t elapsed = now_ms - data->three_down_ms;
 
         if (data->three_release_pending) {
+            /* Resumed contact must earn fresh movement history, not reuse a fling. */
+            data->three_scroll_release_valid = false;
+            iqs9151_motion_history_reset(&data->three_release_history);
+            if (iqs9151_three_finger_scrolling(data)) {
+                iqs9151_motion_history_reset(&data->scroll_motion_history);
+            }
             data->three_release_pending = false;
             data->three_release_pending_ms = 0;
         }
@@ -1736,9 +1751,36 @@ static bool iqs9151_three_finger_update(struct iqs9151_data *data,
     /* A completed 3F action/scroll owns its staged release until all fingers lift.
      * Do not reinterpret 3->2->1 as a new 2F action or pointer gesture. */
     if (data->three_mode != IQS9151_3F_MODE_NONE && !data->three_tapdrag_second_touch) {
+        if (iqs9151_three_finger_scrolling(data)) {
+            if (data->three_release_pending &&
+                frame->finger_count > prev_frame->finger_count) {
+                /* A 1->2 (or unexpected >3) increase is not the saved release. */
+                data->three_scroll_release_valid = false;
+                iqs9151_motion_history_reset(&data->three_release_history);
+                iqs9151_motion_history_reset(&data->scroll_motion_history);
+            } else if (!data->three_release_pending &&
+                       prev_frame->finger_count == 3U &&
+                       (frame->finger_count == 1U || frame->finger_count == 2U)) {
+                /* Freeze the last valid 3F release context, never start work here.
+                 * Remaining contacts still belong to this gesture until all up. */
+                data->three_release_history = data->scroll_motion_history;
+                data->three_scroll_release_ms = frame_ms;
+                data->three_scroll_release_valid = true;
+#if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
+                LOG_INF("GISAVE seq=%u t=%u fc=%u history=%u",
+                        data->diagnostic_seq, (uint32_t)frame_ms, frame->finger_count,
+                        data->three_release_history.count);
+#endif
+            }
+        }
         if (frame->finger_count == 0U) {
             /* End once, after the whole 3->2->1->0 tail; retain history until then. */
             result->scroll_ended = iqs9151_three_finger_scrolling(data);
+            if (result->scroll_ended && data->three_scroll_release_valid) {
+                data->scroll_motion_history = data->three_release_history;
+                result->scroll_release_saved = true;
+                result->scroll_release_ms = data->three_scroll_release_ms;
+            }
             iqs9151_three_finger_reset(data);
         } else {
             data->three_release_pending = true;
@@ -2142,7 +2184,8 @@ static bool iqs9151_handle_show_reset(struct iqs9151_data *data,
 static bool iqs9151_update_gesture_sessions(struct iqs9151_data *data,
                                             const struct iqs9151_frame *frame,
                                             const struct iqs9151_frame *prev_frame,
-                                            struct iqs9151_two_finger_result *two_result) {
+                                            struct iqs9151_two_finger_result *two_result,
+                                            int64_t frame_ms) {
     const struct device *dev = data->dev;
     bool released_from_hold = false;
 
@@ -2251,7 +2294,7 @@ static bool iqs9151_update_gesture_sessions(struct iqs9151_data *data,
         iqs9151_two_finger_update(data, frame, prev_frame, dev, two_result);
     }
     if (frame->finger_count != 3U && data->three_active) {
-        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result);
+        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result, frame_ms);
     }
 
     switch (frame->finger_count) {
@@ -2268,7 +2311,7 @@ static bool iqs9151_update_gesture_sessions(struct iqs9151_data *data,
         }
         break;
     case 3U:
-        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result);
+        (void)iqs9151_three_finger_update(data, frame, prev_frame, dev, two_result, frame_ms);
         break;
     default:
         break;
@@ -2346,16 +2389,19 @@ static void iqs9151_update_inertia_ema(struct iqs9151_data *data,
 
     /* Inertial Scrolling */
     if (two_result->scroll_ended) {
+        const int64_t release_ms = two_result->scroll_release_saved
+                                       ? two_result->scroll_release_ms : now_ms;
 #if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
-        LOG_INF("GIREL version=1 seq=%u t=%u fc=%u history=%u enabled=%u",
+        LOG_INF("GIREL version=2 seq=%u t=%u fc=%u history=%u enabled=%u eval=%u saved=%u",
                 data->diagnostic_seq, (uint32_t)now_ms, frame->finger_count,
                 data->scroll_motion_history.count,
-                IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_INERTIA_ENABLE));
+                IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_INERTIA_ENABLE),
+                (uint32_t)release_ms, two_result->scroll_release_saved);
 #endif
         if (IS_ENABLED(CONFIG_INPUT_IQS9151_SCROLL_INERTIA_ENABLE) &&
             iqs9151_inertia_seed_from_history(&data->scroll_motion_history,
                                               &iqs9151_scroll_params,
-                                              &iqs9151_scroll_gate_params, now_ms,
+                                              &iqs9151_scroll_gate_params, release_ms,
                                               &seed_vx_fp, &seed_vy_fp)) {
             iqs9151_inertia_start(&data->inertia_scroll, &data->inertia_scroll_work,
                                   &iqs9151_scroll_params, seed_vx_fp, seed_vy_fp);
@@ -2445,7 +2491,7 @@ static void iqs9151_process_frame(struct iqs9151_data *data,
 #endif
 
     released_from_hold =
-        iqs9151_update_gesture_sessions(data, frame, &prev_frame, &two_result);
+        iqs9151_update_gesture_sessions(data, frame, &prev_frame, &two_result, now_ms);
 #if defined(CONFIG_INPUT_IQS9151_GESTURE_DIAGNOSTICS)
     if (diagnose) {
         LOG_INF("GSTEP seq=%u step2=%d,%d step3=%d,%d a3=%u m3=%u last3=%u sum3=%d,%d",
@@ -3054,6 +3100,11 @@ bool iqs9151_test_scroll_inertia_active(const void *ctx) {
     const struct iqs9151_data *data = (const struct iqs9151_data *)ctx;
 
     return data->inertia_scroll.active;
+}
+
+bool iqs9151_test_three_release_saved(const void *ctx) {
+    const struct iqs9151_data *data = (const struct iqs9151_data *)ctx;
+    return data->three_scroll_release_valid;
 }
 
 void iqs9151_test_force_pinch_session(void *ctx, bool active) {

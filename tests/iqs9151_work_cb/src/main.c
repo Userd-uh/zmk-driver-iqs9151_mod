@@ -1440,6 +1440,40 @@ ZTEST_F(iqs9151_work_cb, test_three_finger_swipe_left_continuous_touch_emits_onc
 #include "sensor_diagnostics.inc"
 #endif
 
+ZTEST_F(iqs9151_work_cb, test_tap_and_pinch_do_not_save_three_finger_release) {
+    struct iqs9151_test_frame frame = make_frame(3, 0x303, 0, 0, 0, 1000, 1000, 1200, 1000);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    for (int count = 2; count >= 0; count--) {
+        frame.finger_count = count;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 10 + (2-count)*5);
+        zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+    }
+    iqs9151_work_cb_before(fixture);
+    iqs9151_test_force_pinch_session(fixture->ctx, true);
+    frame.finger_count = 1;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 30);
+    zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+    zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+}
+
+#if !defined(IQS_GESTURE_MATRIX) && !defined(IQS_SCROLL_PIPELINE)
+ZTEST_F(iqs9151_work_cb, test_action_does_not_save_three_finger_release) {
+    struct iqs9151_test_frame frame = make_frame(3, 0x303, 0, 0, 0, 1000, 1000, 1200, 1000);
+    iqs9151_test_process_frame(fixture->ctx, &frame, 0);
+    frame.finger1_x += 400;
+    iqs9151_test_process_frame(fixture->ctx, &frame, 10);
+    zassert_equal(fixture->log.count, 2, "Action key press/release must remain intact");
+    for (int count = 2; count >= 0; count--) {
+        frame.finger_count = count;
+        iqs9151_test_process_frame(fixture->ctx, &frame, 20 + (2-count)*5);
+        zassert_false(iqs9151_test_three_release_saved(fixture->ctx));
+        zassert_false(iqs9151_test_scroll_inertia_active(fixture->ctx));
+        zassert_equal(fixture->log.count, 2);
+    }
+}
+#endif
+
 ZTEST_F(iqs9151_work_cb, test_initial_split_comparison_preserves_adjacent_settings) {
     size_t length;
     const uint8_t *config = iqs9151_test_initial_config(&length);
